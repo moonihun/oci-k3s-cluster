@@ -1,0 +1,92 @@
+#cloud-config
+
+bootcmd:
+  - [ cloud-init-per, once, growpart, growpart, /dev/sda, "3" ]
+  - [ cloud-init-per, once, pvresize, pvresize, /dev/sda3 ]
+  - [ cloud-init-per, once, lvextend, lvextend, -l, +100%FREE, /dev/mapper/ocivolume-root ]
+  - [ cloud-init-per, once, xfs_growfs, xfs_growfs, / ]
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - curl
+  - wget
+  - git
+  - nfs-kernel-server
+
+write_files:
+  # SSH Private Key
+  - path: /home/ubuntu/.ssh/id_ed25519_oci
+    permissions: '0600'
+    content: |
+      ${ssh_private_key}
+
+  - path: /usr/local/bin/get-k3s-ips.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -e 
+
+      # Public IP 
+      PUBLIC_IP=${master_public_ip}
+
+      # Private IP
+      PRIVATE_IP=$(hostname -I | awk '{print $1}')
+      
+      echo "PUBLIC_IP=$PUBLIC_IP"
+      echo "PRIVATE_IP=$PRIVATE_IP"
+
+  - path: /etc/rancher/k3s/config.yaml
+    permissions: '0644'
+    content: |
+      token: ${k3s_token}
+      cluster-init: true
+      disable:
+        - traefik
+      flannel-backend: none
+      disable-network-policy: true
+      write-kubeconfig-mode: "0644"
+
+runcmd:
+  - chown ubuntu:ubuntu /home/ubuntu/.ssh/id_ed25519_oci
+  - chmod 600 /home/ubuntu/.ssh/id_ed25519_oci
+  # iptables 초기화
+  - [ bash, -c, 'iptables -F && iptables -X || true' ]
+  - [ bash, -c, 'iptables -t nat -F && iptables -t nat -X || true' ]
+
+  # NFS 설정
+  - [ bash, -c, 'mkdir -p /nfs/storage && chmod 777 /nfs/storage' ]
+  - [ bash, -c, 'echo "/nfs/storage 10.0.0.0/16(rw,sync,no_subtree_check,no_root_squash)" >> /etc/exports' ]
+  - [ bash, -c, 'systemctl enable --now nfs-kernel-server.service' ]
+  - [ bash, -c, 'exportfs -ra' ]
+
+  # K3S config 디렉터리 생성 및 설정 파일 준비 (K3S 설치 전에 반드시 완료)
+  - [ mkdir, -p, /etc/rancher/k3s ]
+  - |
+    bash -c 'cat > /etc/rancher/k3s/config.yaml <<EOF
+    token: ${k3s_token}
+    cluster-init: true
+    disable:
+      - traefik
+    flannel-backend: none
+    disable-network-policy: true
+    write-kubeconfig-mode: "0644"
+    tls-san:
+      - $(hostname -I | awk "{print \$1}")
+      - ${master_public_ip}
+    EOF'
+
+  # K3S 설치 (config 파일이 준비된 후)
+  - [ bash, -c, 'curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server --cluster-init" sh -s -' ]
+
+  # K3S 시작 대기
+  - [ bash, -c, 'for i in {1..60}; do systemctl is-active --quiet k3s && break || sleep 2; done' ]
+
+  # Kubeconfig 복사
+  - [ bash, -c, 'mkdir -p /home/ubuntu/.kube && cp /etc/rancher/k3s/k3s.yaml /home/ubuntu/.kube/config && chown -R ubuntu:ubuntu /home/ubuntu/.kube /home/ubuntu/.ssh && chmod 600 /home/ubuntu/.kube/config' ]
+
+  # kubectl alias
+  - [ bash, -c, 'echo "alias k=kubectl" >> /home/ubuntu/.bashrc && echo "export KUBECONFIG=/home/ubuntu/.kube/config" >> /home/ubuntu/.bashrc' ]
+
+final_message: "K3S Master installation completed after $UPTIME seconds"

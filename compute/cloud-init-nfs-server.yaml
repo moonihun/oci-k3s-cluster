@@ -1,0 +1,35 @@
+#cloud-config
+
+runcmd:
+  # Swap 파일 생성 (1-2GB 권장)
+  - fallocate -l 1G /swapfile
+  - chmod 600 /swapfile
+  - mkswap /swapfile
+  - swapon /swapfile
+  - echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  
+  # Swappiness 조정 (swap 사용 최소화)
+  - sysctl vm.swappiness=10
+  - echo 'vm.swappiness=10' >> /etc/sysctl.conf
+
+  # NFS 디렉토리 생성
+  - mkdir -p /nfs/storage && chmod 777 /nfs/storage
+  
+  # NFS exports 설정
+  - echo "/nfs/storage 10.0.0.0/16(rw,sync,no_subtree_check,no_root_squash)" >> /etc/exports
+  
+  # 방화벽 설정
+  - systemctl enable --now firewalld
+  - firewall-cmd --permanent --add-service={nfs,rpc-bind,mountd}
+  - firewall-cmd --reload
+  
+  # SELinux 설정
+  - setenforce 0
+  - sed -i 's/^SELINUX=enforcing$/SELINUX=permissive/' /etc/selinux/config
+  
+  # NFS 서비스 시작
+  - systemctl enable --now nfs-server
+  - exportfs -ra
+
+final_message: "NFS Server setup completed"
+

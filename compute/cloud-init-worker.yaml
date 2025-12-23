@@ -1,0 +1,29 @@
+#cloud-config
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - curl
+  - wget
+
+runcmd:
+  # iptables 초기화 
+  - iptables -F && iptables -X 
+  - iptables -t nat -F && iptables -t nat -X
+  
+  # Master 연결 대기
+  - |
+    until curl -k https://${master_private_ip}:6443/ping 2>/dev/null; do
+      echo "Waiting for master..."
+      sleep 30
+    done
+  
+  # K3S Agent 설치
+  - curl -sfL https://get.k3s.io | K3S_URL=https://${master_private_ip}:6443 K3S_TOKEN=${k3s_token} sh -s - agent
+  
+  # K3S Agent 시작 대기
+  - while ! systemctl is-active --quiet k3s-agent; do sleep 2; done
+
+final_message: "K3S Worker installation completed after $UPTIME seconds"
+
