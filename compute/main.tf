@@ -23,7 +23,7 @@ resource "oci_core_instance" "k3s-master" {
 
   source_details {
     source_type = "image"
-    source_id = local.ubuntu_arm_image_id
+    source_id = local.ol9_arm_image_id
     boot_volume_size_in_gbs = 150
   }
 
@@ -34,7 +34,7 @@ resource "oci_core_instance" "k3s-master" {
 
   metadata = {
     ssh_authorized_keys = file(var.public_key_path)
-    user_data = base64encode(templatefile("${path.module}/cloud-init-master.yaml", {
+    user_data = base64encode(templatefile("${path.module}/cloud-init-master-ol9.yaml", {
       k3s_token = var.k3s_token
       ssh_private_key  = indent(6, var.ssh_private_key) 
       master_public_ip = oci_core_public_ip.k3s_master_ip.ip_address
@@ -89,7 +89,7 @@ resource "oci_core_instance" "k3s_worker" {
   
   source_details {
     source_type = "image"
-    source_id   = local.ubuntu_arm_image_id
+    source_id   = local.ol9_arm_image_id
     boot_volume_size_in_gbs = 50
   }
   
